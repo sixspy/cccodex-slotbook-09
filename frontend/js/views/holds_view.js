@@ -1,11 +1,11 @@
 export const holdsViewTemplate = `
   <div v-show="tab===1" class="panel">
-    <h2>占位</h2>
+    <h2>占位<span class="role-tag" v-if="!canWrite">只读·门闸拒绝</span></h2>
     <div>
-      <input v-model="holdForm.slot_code" placeholder="档期编码" />
-      <input v-model="holdForm.party_key" placeholder="当事人" />
-      <input v-model.number="holdForm.seats" type="number" min="1" style="width:5rem" />
-      <button @click="doHold">占位</button>
+      <input v-model="holdForm.slot_code" placeholder="档期编码" :disabled="!canWrite" />
+      <input v-model="holdForm.party_key" placeholder="当事人" :disabled="!canWrite" />
+      <input v-model.number="holdForm.seats" type="number" min="1" style="width:5rem" :disabled="!canWrite" />
+      <button @click="doHold" :disabled="!canWrite" :title="canWrite ? '' : '只读账号禁止写操作（后端 403）'">占位</button>
     </div>
     <p class="err" v-if="actionErr">{{ actionErr }}</p>
     <table>

@@ -1,6 +1,6 @@
 export const slotsViewTemplate = `
   <div v-show="tab===0" class="panel">
-    <h2>档期盘</h2>
+    <h2>档期盘<span class="role-tag readonly" v-if="!canWrite">只读视图</span><span class="role-tag" v-else>可写视图</span></h2>
     <div class="dash">
       <div class="cell"><div class="n">{{ dash.slots_open }}</div>开放档</div>
       <div class="cell"><div class="n">{{ dash.holds_open }}</div>占位中</div>

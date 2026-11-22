@@ -6,12 +6,15 @@ import { confirmViewTemplate } from "./views/confirm_view.js";
 import { reconcileViewTemplate } from "./views/reconcile_view.js";
 import { auditViewTemplate } from "./views/audit_view.js";
 
-const { createApp, ref, onMounted } = Vue;
+const { createApp, ref, computed, onMounted } = Vue;
 
 createApp({
   setup() {
     const token = ref(localStorage.getItem("slotbook_token") || "");
     const user = ref(localStorage.getItem("slotbook_user") || "");
+    // 角色门闸：角色仅用于同态呈现，真正写权以后端 require_writer 为准
+    const role = ref(localStorage.getItem("slotbook_role") || "");
+    const canWrite = computed(() => role.value !== "只读" && !!token.value);
     const username = ref("admin");
     const password = ref("123456");
     const err = ref("");
@@ -32,8 +35,10 @@ createApp({
     function logout() {
       token.value = "";
       user.value = "";
+      role.value = "";
       localStorage.removeItem("slotbook_token");
       localStorage.removeItem("slotbook_user");
+      localStorage.removeItem("slotbook_role");
     }
     const api = createApi(() => token.value, logout);
 
@@ -48,8 +53,10 @@ createApp({
       if (!r.ok) { err.value = j.detail || "登录失败"; return; }
       token.value = j.token;
       user.value = j.username;
+      role.value = j.role;
       localStorage.setItem("slotbook_token", j.token);
       localStorage.setItem("slotbook_user", j.username);
+      localStorage.setItem("slotbook_role", j.role);
       await refresh();
     }
 
@@ -66,15 +73,26 @@ createApp({
       contention.value = (await api.get("/api/contention")).items;
     }
 
+    // 只读守卫仅作同态呈现与误触保护；后端门闸才是写权唯一裁决，禁用不藏按钮。
+    function guardReadOnly() {
+      if (!canWrite.value) {
+        actionErr.value = "只读·门闸拒绝：只读账号禁止写操作（后端 403）";
+        return true;
+      }
+      return false;
+    }
     async function doHold() {
+      if (guardReadOnly()) return;
       try { actionErr.value = ""; await api.post("/api/holds", holdForm.value); await refresh(); }
       catch (e) { actionErr.value = e.message; }
     }
     async function doConfirm() {
+      if (guardReadOnly()) return;
       try { actionErr.value = ""; await api.post("/api/bookings/confirm", { hold_id: confirmId.value }); await refresh(); }
       catch (e) { actionErr.value = e.message; }
     }
     async function promoteWait(id) {
+      if (guardReadOnly()) return;
       try { actionErr.value = ""; await api.post("/api/waitlist/promote", { wait_id: id }); await refresh(); }
       catch (e) { actionErr.value = e.message; }
     }
@@ -82,7 +100,7 @@ createApp({
     onMounted(() => { if (token.value) refresh(); });
 
     return {
-      token, user, username, password, err, actionErr, tab, nav,
+      token, user, role, canWrite, username, password, err, actionErr, tab, nav,
       slots, holds, waitlist, bookings, recon, audits, contention, dash,
       holdForm, confirmId, login, logout, refresh, doHold, doConfirm, promoteWait,
     };
@@ -106,7 +124,7 @@ createApp({
     </aside>
     <main class="main">
       <div class="topbar">
-        <span class="pill">{{ user }}</span>
+        <span class="pill">{{ user }}<span class="role-badge" :class="{readonly: !canWrite}">{{ canWrite ? (role || '可写') : '只读' }}</span></span>
         <div>
           <button class="ghost" @click="refresh">刷新</button>
           <button class="ghost" @click="logout">退出</button>
