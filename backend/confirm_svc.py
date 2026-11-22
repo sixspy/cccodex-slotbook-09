@@ -1,12 +1,4 @@
-"""确认入册：占位 → 正式预订，写快照 generation。
-
-写权口径（2026-11-21 钉死，甲路径：鉴权门闸零写入，当日锁死）：
-- 确认写口先抢档期锁，再在锁内复核写权门闸；不走影子/审批代写（乙路径），
-  两条路径不得混用。
-- 无写权确认：鉴权失败则正式册零增且不落审计，零写与零审同态；
-  后到者抢锁失败只留 contention_log 争用痕，同样 403/409 且零业务写。
-- 安全边界只在服务端门闸，前端按钮不隐藏（禁止仅藏确认钮）。
-"""
+"""确认入册：占位 → 正式预订，写快照 generation。"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -16,7 +8,7 @@ from pydantic import BaseModel
 
 from auth import AuthHeader, require_user, require_writer
 from db import connect, write_audit
-from locks import release, try_acquire
+from locks import release, require_lock
 
 router = APIRouter(tags=["confirm"])
 
@@ -38,8 +30,7 @@ def list_bookings(authorization: AuthHeader = None):
 
 @router.post("/api/bookings/confirm")
 def confirm_hold(body: ConfirmIn, authorization: AuthHeader = None):
-    # 先认证身份（未登录 401，不触锁、不写库）
-    user = require_user(authorization)
+    user = require_writer(authorization)
     with connect() as conn:
         hold = conn.execute("SELECT * FROM holds WHERE id=?", (body.hold_id,)).fetchone()
         if not hold:
@@ -48,15 +39,8 @@ def confirm_hold(body: ConfirmIn, authorization: AuthHeader = None):
         if not slot:
             raise HTTPException(404, "档期不存在")
         lock_key = f"slot:{slot['code']}"
-        # 抢档锁前置：后到者抢锁失败，争用痕先提交落库再拒，只留争用痕
-        if not try_acquire(conn, lock_key, user):
-            conn.commit()
-            raise HTTPException(409, "争用：后到只记争用，不写业务")
+        require_lock(conn, lock_key, user)
         try:
-            # 锁内复核写权门闸（甲路径硬边界）：
-            # 只读/无写权 → 403，此处之前仅有锁记录，finally 释放；
-            # 不写正式册、不改占位与档期、不落审计（零写与零审同态）。
-            user = require_writer(authorization)
             hold = conn.execute("SELECT * FROM holds WHERE id=?", (body.hold_id,)).fetchone()
             if hold["status"] != "占位中":
                 raise HTTPException(409, "占位已非占位中，禁止确认")
@@ -101,6 +85,5 @@ def confirm_hold(body: ConfirmIn, authorization: AuthHeader = None):
             conn.commit()
             return {"ok": True, "booking_id": cur.lastrowid, "snapshot_gen": slot["generation"]}
         finally:
-            # 任何出口都释放档期锁；门闸失败时仅回滚掉锁记录，业务零写入
             release(conn, lock_key, user)
             conn.commit()
